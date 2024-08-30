@@ -43,9 +43,12 @@ def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0301"):
 
 
 def cache_request(cache: Cache, params: dict, values: Union[Dict, None] = None) -> Any:
+    # Convert Message objects to dictionaries
+    serializable_params = json.loads(json.dumps(params, default=lambda o: o.to_dict() if hasattr(o, 'to_dict') else str(o)))
+    
     # Generate a unique key for the request
 
-    key = hashlib.md5(json.dumps(params, sort_keys=True).encode("utf-8")).hexdigest()
+    key = hashlib.md5(json.dumps(serializable_params, sort_keys=True).encode("utf-8")).hexdigest()
     # Check if the request is cached
     if key in cache and values is None:
         # print("retrieving from cache")
