@@ -5,7 +5,7 @@ from llmx.datamodel import TextGenerationConfig, Message
 ollama_gen = llm(provider="ollama")
 
 # Prepare a simple message
-messages = [Message(role="user", content="What is the capital of France?")]
+messages = [Message(role="user", content="What is the height of eiffel tower?")]
 
 # Create a configuration
 config = TextGenerationConfig(

@@ -9,3 +9,4 @@ cohere
 transformers
 torch
 ollama
+cachetools
