@@ -1,92 +1,123 @@
-# Import necessary modules and types
+import json
+import logging
 from typing import Union, List, Dict
 from .base_textgen import TextGenerator
 from ...datamodel import Message, TextGenerationConfig, TextGenerationResponse
 from ...utils import cache_request, get_models_maxtoken_dict, num_tokens_from_messages
-import os
 import requests
 from dataclasses import asdict
-import json
 
-# Define a custom JSON encoder for the Message class
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 class MessageEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Message):
             return {
                 "role": obj.role,
                 "content": obj.content
-                # Add any other relevant attributes
             }
-        return super().default(obj)
+        #elif isinstance(obj, dict):
+        #    return {k: self.default(v) for k, v in obj.items() if not k.startswith('_')}
+        elif isinstance(obj, list):
+            return [self.default(item) for item in obj]
+        elif hasattr(obj, '__dict__'):
+            return self.default({k: v for k, v in obj.__dict__.items() if not k.startswith('_')})
+        try:
+            return json.JSONEncoder.default(self, obj)
+        except TypeError:
+            return str(obj)  # Convert to string if not JSON serializable
 
-# Define a class for generating text using Ollama
 class OllamaTextGenerator(TextGenerator):
     def __init__(
         self,
-        api_base: str = "http://localhost:11434",  # Default URL for Ollama API
+        api_base: str = "http://localhost:11434",
         provider: str = "ollama",
         model: str = None,
         models: Dict = None,
     ):
-        # Initialize the parent class
         super().__init__(provider=provider)
-        # Set the API base URL
         self.api_base = api_base
-        # Set the default model name
         self.model_name = model or "llama2"
-        # Get a dictionary of maximum token limits for different models
         self.model_max_token_dict = get_models_maxtoken_dict(models)
+        logger.debug(f"Initialized OllamaTextGenerator with api_base: {api_base}, model: {self.model_name}")
 
-    # Method to generate text based on input messages
     def generate(
         self,
-        messages: Union[List[dict], str],  # Input messages or text
-        config: TextGenerationConfig = TextGenerationConfig(),  # Configuration for text generation
+        messages: Union[List[Dict], str],
+        config: TextGenerationConfig = TextGenerationConfig(),
         **kwargs,
     ) -> TextGenerationResponse:
-        # Determine whether to use caching
-        use_cache = config.use_cache
-        # Get the model name from config or use the default
-        model = config.model or self.model_name
-        # Count the number of tokens in the input messages
-        prompt_tokens = num_tokens_from_messages(messages)
-        # Calculate the maximum number of tokens for the response
-        max_tokens = max(
-            self.model_max_token_dict.get(
-                model, 4096) - prompt_tokens - 10, 200
-        )
+        logger.debug(f"Messages received: {messages}")
+        logger.debug(f"Config received: {config}")
 
-        # Prepare the configuration for Ollama API
+        use_cache = getattr(config, 'use_cache', False)
+        model = getattr(config, 'model', None) or self.model_name
+        prompt_tokens = num_tokens_from_messages(messages)
+        max_tokens = max(
+            self.model_max_token_dict.get(model, 409600) - prompt_tokens - 10, 200
+        )
+        logger.debug(f"Calculated max_tokens: {max_tokens}")
+
         ollama_config = {
             "model": model,
-            "temperature": config.temperature,
+            "temperature": getattr(config, 'temperature', 0.7),
             "num_predict": max_tokens,
-            "top_p": config.top_p,
-            "frequency_penalty": config.frequency_penalty,
-            "presence_penalty": config.presence_penalty,
+            "top_p": getattr(config, 'top_p', 1.0),
+            "frequency_penalty": getattr(config, 'frequency_penalty', 0.0),
+            "presence_penalty": getattr(config, 'presence_penalty', 0.0),
             "stream": False,
-            "messages": [MessageEncoder().default(msg) for msg in messages],
         }
 
-        # Update the model name
+        logger.debug(f"Ollama config: {ollama_config}")
+
+        try:
+            logger.debug("Attempting to serialize messages")
+            for i, message in enumerate(messages):
+                logger.debug(f"Message {i}: {message}")
+                try:
+                    json.dumps(message, cls=MessageEncoder)
+                except TypeError as e:
+                    logger.error(f"Error serializing message {i}: {e}")
+                    logger.error(f"Problematic message content: {message}")
+                    for key, value in message.items():
+                        logger.debug(f"Key: {key}, Value type: {type(value)}")
+                        try:
+                            json.dumps(value)
+                        except TypeError:
+                            logger.error(f"Non-serializable value in key '{key}': {value}")
+
+            ollama_config["messages"] = json.loads(json.dumps(messages, cls=MessageEncoder))
+        except TypeError as e:
+            logger.error(f"Error serializing messages: {e}")
+            logger.error(f"Messages content: {messages}")
+            # Attempt to serialize with default encoder as fallback
+            try:
+                ollama_config["messages"] = json.loads(json.dumps(messages, default=str))
+            except Exception as e2:
+                logger.error(f"Fallback serialization also failed: {e2}")
+                raise
+
+        logger.debug(f"Ollama config: {ollama_config}")
+
         self.model_name = model
-        # Prepare parameters for caching
-        cache_key_params = ollama_config | {"messages": messages}
-        
-        # If caching is enabled, try to retrieve a cached response
+        cache_key_params = ollama_config.copy()
+        cache_key_params['messages'] = messages
+
         if use_cache:
+            logger.debug("Attempting to use cache")
             response = cache_request(cache=self.cache, params=cache_key_params)
             if response:
+                logger.debug("Cache hit, returning cached response")
                 return TextGenerationResponse(**response)
+            logger.debug("Cache miss, proceeding with API call")
 
-        # Make a POST request to the Ollama API
+        logger.debug(f"Sending request to Ollama API: {self.api_base}/api/chat")
         ollama_response = requests.post(f"{self.api_base}/api/chat", json=ollama_config)
-        # Raise an exception if the request was unsuccessful
         ollama_response.raise_for_status()
-        # Parse the JSON response
         ollama_data = ollama_response.json()
+        logger.debug(f"Ollama response: {ollama_data}")
 
-        # Create a TextGenerationResponse object with the API response
         response = TextGenerationResponse(
             text=[Message(role="assistant", content=ollama_data['message']['content'])],
             logprobs=[],
@@ -97,14 +128,16 @@ class OllamaTextGenerator(TextGenerator):
                 "total_tokens": ollama_data['prompt_eval_count'] + ollama_data['eval_count']
             },
         )
+        logger.debug(f"Created TextGenerationResponse: {response}")
 
-        # If caching is enabled, store the response in the cache
         if use_cache:
+            logger.debug("Caching response")
             cache_request(
                 cache=self.cache, params=cache_key_params, values=asdict(response)
             )
         return response
 
-    # Method to count the number of tokens in a given text
     def count_tokens(self, text) -> int:
-        return num_tokens_from_messages(text)
+        count = num_tokens_from_messages(text)
+        logger.debug(f"Token count for text: {count}")
+        return count
