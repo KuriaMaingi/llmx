@@ -1,6 +1,7 @@
 # Sets the the default model to use for llm() when no provider parameter is set.
 model:
-  provider: openai
+  provider: Ollama
+  model: llama3.1:8b
   parameters:
     api_key: null
 
@@ -16,6 +17,16 @@ providers:
           provider: anthropic
           parameters:
             model: claude-3-5-sonnet-20240620
+  ollama:
+    name: Ollama
+    description: Ollama local models.
+    models:
+      - name: llama3.1:8b
+        max_tokens: 1024  # Specify the maximum number of tokens
+        model:
+          provider: ollama
+          parameters:
+            model: llama3.1b
   openai:
     name: OpenAI
     description: OpenAI's and AzureOpenAI GPT-3 and GPT-4 models.

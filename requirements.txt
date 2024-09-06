@@ -1,0 +1,12 @@
+diskcache
+requests
+tiktoken
+google-auth
+pydantic
+openai
+anthropic
+cohere
+transformers
+torch
+ollama
+cachetools

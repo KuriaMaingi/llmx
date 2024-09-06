@@ -17,7 +17,7 @@ config = TextGenerationConfig(
 
 messages = [
     {"role": "user",
-     "content": "What is the capital of France? Only respond with the exact answer"}]
+     "content": "What is the capital of India? Only respond with the exact answer"}]
 
 def test_anthropic():
     anthropic_gen = llm(provider="anthropic", api_key=os.environ.get("ANTHROPIC_API_KEY", None))
@@ -74,3 +74,13 @@ def test_hf_local():
 
     assert ("paris" in answer.lower())
     assert len(hf_local_response.text) == 2
+
+def test_ollama():
+    ollama_gen = llm(provider="ollama")
+    config.model = "llama3.1:8b"  # Using the model specified in the default config
+    ollama_response = ollama_gen.generate(messages, config=config)
+    answer = ollama_response.text[0].content
+    print(ollama_response.text[0].content)
+
+    assert ("New Delhi" in answer)
+    assert len(ollama_response.text) == 2

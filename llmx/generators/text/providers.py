@@ -2,9 +2,19 @@
 
 
 from llmx.utils import load_config
+import logging
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-config = load_config()
-providers = providers = config["providers"] if "providers" in config else None
+try:
+    config = load_config()
+    logger.debug(f"Loaded config: {config}")
 
-providers = config["providers"]
+    if config is None:
+        raise ValueError("Configuration not loaded properly")
+
+    providers = config["providers"]
+except Exception as e:
+    logger.exception(f"Error loading configuration: {e}")
+    raise

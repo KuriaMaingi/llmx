@@ -1,4 +1,4 @@
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 import logging
 import json
 from typing import Any, Union, Dict
@@ -17,35 +17,45 @@ logger = logging.getLogger("llmx")
 
 
 def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0301"):
-    """Returns the number of tokens used by a list of messages."""
+    """Return the number of tokens used by a list of messages."""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
+        print("Warning: model not found. Using cl100k_base encoding.")
         encoding = tiktoken.get_encoding("cl100k_base")
-    if (
-        model == "gpt-3.5-turbo-0301" or True
-    ):  # note: future models may deviate from this
-        num_tokens = 0
-        for message in messages:
-            if not isinstance(message, dict):
-                message = asdict(message)
-
-            num_tokens += (
-                4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
-            )
-
-            for key, value in message.items():
+    
+    if isinstance(messages, dict):
+        messages = [messages]
+    elif isinstance(messages, str):
+        return len(encoding.encode(messages))
+    
+    num_tokens = 0
+    for message in messages:
+        if is_dataclass(message):
+            message = asdict(message)
+        elif not isinstance(message, dict):
+            raise ValueError(f"Expected dict or dataclass, got {type(message)}")
+        
+        num_tokens += 4  # every message follows <im_start>{role/name}\n{content}<im_end>\n
+        for key, value in message.items():
+            num_tokens += len(encoding.encode(str(key)))
+            if isinstance(value, str):
                 num_tokens += len(encoding.encode(value))
-                if key == "name":  # if there's a name, the role is omitted
-                    num_tokens += -1  # role is always required and always 1 token
+            elif isinstance(value, (int, float, bool)):
+                num_tokens += len(encoding.encode(str(value)))
+            else:
+                raise ValueError(f"Unexpected value type in message: {type(value)}")
         num_tokens += 2  # every reply is primed with <im_start>assistant
-        return num_tokens
+    return num_tokens
 
 
 def cache_request(cache: Cache, params: dict, values: Union[Dict, None] = None) -> Any:
+    # Convert Message objects to dictionaries
+    serializable_params = json.loads(json.dumps(params, default=lambda o: o.to_dict() if hasattr(o, 'to_dict') else str(o)))
+    
     # Generate a unique key for the request
 
-    key = hashlib.md5(json.dumps(params, sort_keys=True).encode("utf-8")).hexdigest()
+    key = hashlib.md5(json.dumps(serializable_params, sort_keys=True).encode("utf-8")).hexdigest()
     # Check if the request is cached
     if key in cache and values is None:
         # print("retrieving from cache")
